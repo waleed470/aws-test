@@ -1,0 +1,13 @@
+name: Branch Demo - f1..f9 Visibility
+on:
+  push:
+    branches:
+      - 'f[1-9]'
+jobs:
+  show-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print branch that triggered this workflow
+        run: |
+          echo "Triggered by branch: ${{ github.ref_name }}"
+          echo "✅ Workflow visible for ${{ github.ref_name }}"

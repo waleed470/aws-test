@@ -1,0 +1,878 @@
+# Serverless deployment script
+# First-time stack creation GOTCHAS (from your notes):
+# 1) Temporarily remove any custom authorizer references; they don't exist yet and will error deployment.
+# 2) After first deploy, add authorizer references back and update API Gateway URL in .secrets.yml to the new API URL.
+# 3) Re-run deployment with those changes.
+# 4) Once completed, future stack updates are normal.
+#
+# Additional notes:
+# - If you manually enabled CORS and later set `cors: true`, the OPTIONS method may already exist. Either delete manual OPTIONS methods
+#   from the console or avoid running with the CORS option.
+#
+# Using the prune plugin:
+# - CloudFormation does not remove older versions; you can hit the 75 GB Lambda storage limit.
+# - Use: `serverless prune -n [versions_to_keep] --stage [stage]`, e.g.:
+#        serverless prune -n 5 --stage develop
+#        serverless prune -n 5 --stage temp
+
+service: ibsProviderLocator
+
+provider:
+  name: aws
+  stage: ${opt:stage, 'develop'}
+  runtime: nodejs16.x
+  region: us-east-1
+  memorySize: 256
+  timeout: 30
+  profile: ibs # profile to use from credentials file
+  role: ${file(.secrets.yml):lambdaRole}
+  deploymentBucket: ibs-deployment-artifacts
+  iamManagedPolicies:
+    - arn:aws:iam::aws:policy/AmazonSESFullAccess
+    - arn:aws:iam::aws:policy/AmazonRDSReadOnlyAccess
+  vpc:
+    securityGroupIds:
+      - ${file(.secrets.yml):securityGroup}
+    subnetIds:
+      - ${file(.secrets.yml):subnet1}
+  environment:
+    DB_HOST: ${file(sm-secrets.yml):POSTGRES_DB_HOST}
+    SCHEMA_PATH: ${file(.secrets.yml):schemaPath}
+    DB_USER: ${file(sm-secrets.yml):POSTGRES_DB_USER}
+    DB_PASSWORD: ${file(sm-secrets.yml):POSTGRES_DB_PASSWORD}
+    DB_DATABASE: ${file(.secrets.yml):rdsDbName}
+    DB_PORT: ${file(.secrets.yml):rdsDbPort}
+    API_ID: ${file(.secrets.yml):apiId}
+    AWS_MAIL_RECEIVER: ${file(.secrets.yml):awsMailReceiver}
+    AWS_MAIL_SENDER: ${file(.secrets.yml):awsMailSender}
+    AWS_ACCESS_KEY_ID_TWO: ${file(sm-secrets.yml):AWS_IBS_ID}
+    AWS_SECRET_ACCESS_KEY_TWO: ${file(sm-secrets.yml):AWS_IBS_KEY}
+    AWS_QUOTE_CREATED_SNS_TOPIC_ARN: ${file(.secrets.yml):awsQuotesCreatedSNSTopicArn}
+    AWS_CONTRACT_CREATED_SNS_TOPIC_ARN: ${file(.secrets.yml):awsContractCreatedSNSTopicArn}
+    AWS_ADDRESS_SEARCHED_SNS_TOPIC_ARN: ${file(.secrets.yml):awsAddressSearchedSNSTopicArn}
+    AWS_ACCESS_KEY_ID_CEREBRO: ${file(sm-secrets.yml):AWS_CEREBRO_ID}
+    AWS_SECRET_ACCESS_KEY_CEREBRO: ${file(sm-secrets.yml):AWS_CEREBRO_KEY}
+    BUCKET_NAME: ${file(.secrets.yml):bucketName}
+    GOOGLE_MAPS_API_KEY: ${file(sm-secrets.yml):GOOGLE_MAPS_API_KEY}
+    IBS_AWS_REGION: ${file(.secrets.yml):ibsAwsRegion}
+    SQS_URL_MULTI_SITE_SEARCH: ${file(.secrets.yml):sqsUrlMultiSiteSearch}
+    SQS_TRANSACTION_BOOKKEEPER: ${file(.secrets.yml):sqsTransactionBookkeeper}
+    TOKEN_SECRET_KEY: ${file(.secrets.yml):tokenSecretKey}
+    TOKEN_EXPIRE: ${file(.secrets.yml):tokenExpire}
+    COX_TOKEN_API: ${file(.secrets.yml):coxTokenApi}
+    COX_SERVICEABILITY_API: ${file(.secrets.yml):coxServiceabilityApi}
+    CLIENT_SECRET: ${file(sm-secrets.yml):CLIENT_SECRET}
+    CLIENT_ID: ${file(.secrets.yml):clientId}
+    CERT_API_USERNAME: ${file(.secrets.yml):certApiUsername}
+    CERT_API_PASSWORD: ${file(.secrets.yml):certApiPassword}
+    CERT_API_URL: ${file(.secrets.yml):certApiUrl}
+    CERT_API_AUTH_TOKEN: ${file(sm-secrets.yml):CERT_API_AUTH_TOKEN}
+    CERT_API_PARTNER_NAME: ${file(.secrets.yml):certApiPartnerName}
+    OPPORTUNITY_PROCESS_ID: ${file(.secrets.yml):opportunityProcessId}
+    RPM_API_KEY: ${file(sm-secrets.yml):RPM_API_KEY}
+    RPM_API_KEY_NUM: ${file(.secrets.yml):rpmApiKeyNum}
+    INNOVATIVE_RPM_API_KEY: ${file(sm-secrets.yml):INNOVATIVE_RPM_API_KEY}
+    INNOVATIVE_RPM_API_KEY_NUM: ${file(.secrets.yml):innovativeRpmApiKeyNum}
+    ENVIRONMENT: ${file(.secrets.yml):environment}
+    SPECTRUM_BUYFLOW_SERVICEABILITY_URL: ${file(.secrets.yml):spectrumBuyflowServiceabilityURL}
+    USPS_CLIENT_ID: ${file(.secrets.yml):uspsClientID}
+    USPS_CLIENT_SECRET: ${file(.secrets.yml):uspsClientSecret}
+    S3_CEREBRO_BUCKET_NAME: ${file(.secrets.yml):cerebroS3Bucket}
+    SPECTRUM_FIBER_TOKEN_URL: ${file(.secrets.yml):spectrumFiberTokenURL}
+    SPECTRUM_FIBER_CLIENT_ID: ${file(.secrets.yml):spectrumFiberClientId}
+    SPECTRUM_FIBER_CLIENT_SECRET: ${file(.secrets.yml):spectrumFiberClientSecret}
+    SPECTRUM_FIBER_SERVICEABILITY_URL: ${file(.secrets.yml):spectrumFiberServiceabilityURL}
+    ATT_QUICK_QUOTE_CLIENT_ID: ${file(.secrets.yml):attQuickQuoteClientId}
+    ATT_QUICK_QUOTE_CLIENT_SECRET: ${file(.secrets.yml):attQuickQuoteClientSecret}
+    ATT_QUICK_QUOTE_SERVICEABILITY_URL: ${file(.secrets.yml):attQuickQuoteServiceabilityURL}
+    LUMEN_OAUTH_TOKEN_URL: ${file(.secrets.yml):lumenOAuthTokenUrl}
+    LUMEN_CLIENT_ID: ${file(.secrets.yml):lumenClientId}
+    LUMEN_CLIENT_SECRET: ${file(.secrets.yml):lumenClientSecret}
+    LUMEN_PRODUCT_CAPABILITY_URL: ${file(.secrets.yml):lumenProductCapability}
+    LUMEN_PRODUCT_CATALOG_URL: ${file(.secrets.yml):lumenProductCatalogURL}
+    STARLINK_SERVICEABILITY_API_URL: ${file(.secrets.yml):starlinkServiceabilityApiURL}
+    CEREBRO_URL: ${file(.secrets.yml):cerebroUrl}
+    LUMEN_ORDER_CC_EMAIL: ${file(.secrets.yml):lumenOrderCCEmail}
+
+  tags:
+    Environment: ${file(.secrets.yml):env}
+
+  apiKeys:
+    - external:
+        - ${opt:stage}-externalKey
+    - internal:
+        - ${opt:stage}-internalKey
+  usagePlan:
+    - external:
+        quota:
+          limit: 5000
+          offset: 0
+          period: DAY
+        throttle:
+          burstLimit: 2000
+          rateLimit: 1000
+    - internal:
+        quota:
+          limit: 100000
+          offset: 1
+          period: MONTH
+        throttle:
+          burstLimit: 3000
+          rateLimit: 1500
+
+package:
+  exclude:
+    - .gitignore
+    - .vscode
+    - .webpack
+    - google-geocoding/**
+    - serverless-iw-develop.yml
+    - serverless-ibs-production.yml
+    - serverless-resources.yml
+    - mock-event.json
+    # - node_modules/aws-sdk/**
+    # - node_modules/serverless/**
+    # - node_modules/serverless-offline/**
+    - webpack.config.js
+    - serverless-connectivity.yml
+
+functions:
+  ibs-custom-authorizer:
+    handler: authorizer/aws-custom-authorizer.handler
+    description: Authorizer that checks validity of the provided token.
+
+  ibs-user-login:
+    handler: src/user-login.handler
+    description: Authenticate the user with his username and password.
+    events:
+      - http:
+          path: user/login
+          method: POST
+          cors: true
+
+  ibs-user-create:
+    handler: src/user-create.handler
+    description: Signup a new user.
+    events:
+      - http:
+          path: user
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-user-get-all:
+    handler: src/user-get-all.handler
+    description: Get all users.
+    events:
+      - http:
+          path: users
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-get-all-users:
+    handler: src/get-all-users.handler
+    description: Get all users.
+    events:
+      - http:
+          path: allusers
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-quotations-get:
+    handler: src/get-quotations.handler
+    description: Get all quotations.
+    events:
+      - http:
+          path: quotations
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organizations-get:
+    handler: src/get-organizations.handler
+    description: Get all organizations.
+    events:
+      - http:
+          path: organizations
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-contracts-get:
+    handler: src/get-contracts.handler
+    description: Get all contracts.
+    events:
+      - http:
+          path: contracts
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-user-login-details-get:
+    handler: src/get-user-login-details.handler
+    description: Get all user-logins.
+    events:
+      - http:
+          path: userlogins
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-user-update:
+    handler: src/user-update.handler
+    description: Update user.
+    events:
+      - http:
+          path: user
+          method: PUT
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-user-activate:
+    handler: src/user-activate-deactivate.handler
+    description: Update user status.
+    events:
+      - http:
+          path: user/status
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-get-lit-buildings:
+    handler: src/get-lit-buildings.handler
+    description: Get nearest lit buildings for the entered address.
+    events:
+      - http:
+          path: lit-buildings
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-get-partial-lit-buildings:
+    handler: src/get-partial-lit-buildings.handler
+    description: Get nearest lit buildings for the entered address only from the database.
+    events:
+      - http:
+          path: lit-buildings/partial
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-get-qualification-services:
+    handler: src/get-qualification-services.handler
+    description: Get qualification services for ACC & ATT&T
+    events:
+      - http:
+          path: qualification/services
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-get-qualification-product-detail:
+    handler: src/get-qualification-product-detail.handler
+    description: Get qualification product detail for ACC & ATT&T
+    events:
+      - http:
+          path: qualification/product/detail
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-post-credit-check:
+    handler: src/qualifications/credit-check.handler
+    description: Qualification credit check
+    events:
+      - http:
+          path: qualification/creditCheck
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-post-order-qualification:
+    handler: src/qualifications/order-qualification.handler
+    description: Order qualification
+    events:
+      - http:
+          path: order/qualification
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-post-order-create:
+    handler: src/qualifications/create-order.handler
+    description: Create order qualification
+    events:
+      - http:
+          path: order/create
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-post-order-submit:
+    handler: src/qualifications/submit-order.handler
+    description: Submit order qualification
+    events:
+      - http:
+          path: order/submit
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  usps-address-validation:
+    handler: src/sss/usps-address.handler
+    description: Returns usps validated address.
+    events:
+      - http:
+          path: usps/uspsAddressValidation
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-multi-site-search:
+    handler: src/sss/multi-site-search.handler
+    timeout: 900
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: processing-files/
+            - suffix: .csv
+          existing: true
+
+  ibs-send-pricing-quote:
+    handler: src/sss/send-pricing-quote.handler
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: quotes/
+            - suffix: .pdf
+          existing: true
+
+  ibs-import-promotions:
+    handler: src/sss/import-promotions.handler
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: promotions/
+            - suffix: .csv
+          existing: true
+
+  ibs-import-services:
+    handler: src/sss/import-services.handler
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: services/
+            - suffix: .csv
+          existing: true
+
+  ibs-comcast-promotions-get:
+    handler: src/promotions/comcast-promotions-get.handler
+    description: Get all promotions for Comcast.
+    events:
+      - http:
+          path: promotions/comcast
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-cox-promotions-get:
+    handler: src/packages/cox-packages-get.handler
+    description: Get Cox promotions.
+    events:
+      - http:
+          path: promotions/cox
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-send-multi-site-search-results:
+    handler: src/sss/send-multi-site-search-results.handler
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: results/
+            - suffix: .csv
+          existing: true
+
+  ibs-reset-password:
+    handler: src/reset-password.handler
+    description: Allow the user to change his password in case he forgot the old one.
+    events:
+      - http:
+          path: user/reset-password
+          method: POST
+          cors: true
+
+  ibs-status-get:
+    handler: src/status-get.handler
+    description: Response with an unauthorized request to monitoring API uptime
+    events:
+      - http:
+          path: status
+          method: GET
+          cors: true
+
+  ibs-config-get:
+    handler: src/config-get.handler
+    description: Get configuration info.
+    events:
+      - http:
+          path: config
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-config-update:
+    handler: src/config-update.handler
+    description: Update configuration info.
+    events:
+      - http:
+          path: config
+          method: PUT
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-create:
+    handler: src/organization-create.handler
+    description: Create new organization.
+    events:
+      - http:
+          path: organization
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-get-all:
+    handler: src/organization-get-all.handler
+    description: Get all organizations.
+    events:
+      - http:
+          path: organization
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-update:
+    handler: src/organization-update.handler
+    description: Update organization data.
+    events:
+      - http:
+          path: organization
+          method: PUT
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-activate:
+    handler: src/organization-activate-deactivate.handler
+    description: Update organization status.
+    events:
+      - http:
+          path: organization/status
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-type-get-all:
+    handler: src/organization-type-get-all.handler
+    description: Get all organization types.
+    events:
+      - http:
+          path: organization/type
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-type-create:
+    handler: src/organization-type-create.handler
+    description: Create a new organization type.
+    events:
+      - http:
+          path: organization/type
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-organization-type-update:
+    handler: src/organization-type-update.handler
+    description: Update info for an organization type.
+    events:
+      - http:
+          path: organization/type
+          method: PUT
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-role-get-all:
+    handler: src/role-get-all.handler
+    description: Get all roles.
+    events:
+      - http:
+          path: role
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-multi-site-search-get:
+    handler: src/multi-site-search-get.handler
+    description: Get all multi-site searches that the user has made so far.
+    events:
+      - http:
+          path: multi-site-search
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-multi-site-search-get-all:
+    handler: src/sss/multi-site-search-get-all.handler
+    description: Get all multi-site searches for all users.
+    events:
+      - http:
+          path: multi-site-search/admin
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-old-user-pasw:
+    handler: src/old-user-pasw.handler
+    description: Check if the entered password exists.
+    events:
+      - http:
+          path: user/manage-pasw
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-import-comcast-packages:
+    handler: src/sss/import-comcast-packages.handler
+    description: Import Comcast packages to the database.
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: comcast-packages/
+            - suffix: .csv
+          existing: true
+
+  ibs-import-altice-packages:
+    handler: src/sss/import-altice-packages.handler
+    description: Import Altice packages to the database.
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: altice-packages/
+            - suffix: .csv
+          existing: true
+
+  ibs-import-cox-packages:
+    handler: src/sss/import-cox-packages.handler
+    description: Import Cox packages to the database.
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: cox-packages/
+            - suffix: .csv
+          existing: true
+
+  ibs-import-spectrum-packages:
+    handler: src/sss/import-spectrum-packages.handler
+    description: Import Spectrum packages to the database.
+    timeout: 300
+    events:
+      - s3:
+          bucket: ${file(.secrets.yml):bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: spectrum-packages/
+            - suffix: .csv
+          existing: true
+
+  ibs-user-login-nopassw:
+    handler: src/user-login-nopassw.handler
+    description: Authenticate the user with his username only.
+    events:
+      - http:
+          path: user/login-nopassw
+          method: POST
+          cors: true
+
+  ibs-spectrum-fiber-promotions-get:
+    handler: src/promotions/spectrum-fiber-promotions-get.handler
+    description: Get all promotions for Spectrum fiber.
+    events:
+      - http:
+          path: promotions/spectrum/fiber
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-altice-fiber-promotions-get:
+    handler: src/promotions/altice-fiber-promotions-get.handler
+    description: Get all promotions for altice fiber.
+    events:
+      - http:
+          path: promotions/altice/fiber
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-spectrum-promotions-get:
+    handler: src/promotions/spectrum-promotions-get.handler
+    description: Get all promotions for Spectrum.
+    events:
+      - http:
+          path: promotions/spectrum
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-cox-fiber-promotions-get:
+    handler: src/promotions/cox-fiber-promotions-get.handler
+    description: Get all promotions for Cox fiber.
+    events:
+      - http:
+          path: promotions/cox/fiber
+          method: GET
+          cors: true
+          authorizer:
+            name: ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-att-promotions-get:
+    handler: src/promotions/att-promotions-get.handler
+    description: Get all promotions for AT&T.
+    events:
+      - http:
+          path: promotions/att
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-user-deactivate:
+    handler: src/users/actions/post-user.handler
+    description: deactivate user.
+    events:
+      - http:
+          path: users/{userId}/actions/deactivate
+          method: POST
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-v3-get-quote-by-id:
+    handler: src/quotes/get-quotes-by-id-v3.handler
+    description: Get quote by id (V3).
+    events:
+      - http:
+          path: v3/quotes/{quoteId}
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-v3-contracts-id-get:
+    handler: src/contracts/get-contracts-by-id-v3.handler
+    description: Get contract by id (V3).
+    events:
+      - http:
+          path: v3/contracts/{contractId}
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+  ibs-promotions-get:
+    handler: src/promotions/promotions-get.handler
+    description: Get all promotions for provider from query param
+    events:
+      - http:
+          path: promotions/get
+          method: GET
+          cors: true
+          authorizer:
+            name: custom-authorizer
+            arn: arn:aws:lambda:us-east-1:784542571158:function:${self:service}-${opt:stage}-ibs-custom-authorizer
+            resultTtlInSeconds: 0
+            identitySource: method.request.header.Authorization
+
+plugins:
+  - serverless-prune-plugin

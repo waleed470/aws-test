@@ -1,1 +1,185 @@
-# Placeholder: source file not found at /mnt/data/build-and-deploy.yml
+name: Serverless Build and Deploy
+
+on:
+  push:
+    branches:
+      - 'f[1-9]'
+      - 'f10'
+      - 'h[1-3]'
+      - 'dev'
+      - 'ci/*'
+      - 'demo'
+      - 'staging'
+      - 'temp2'
+      - 'uat'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.extract_branch.outputs.branch }}
+    strategy:
+      matrix:
+        serverless: [part1, part2, part3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Extract branch name
+        id: extract_branch
+        shell: bash
+        run: |
+          if [[ "${{ github.base_ref }}" == "temp2" || "${{ github.ref }}" == "refs/heads/temp2" ]]; then
+            echo "branch=temp2" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ github.base_ref }}" == "dev" || "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "branch=develop" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ github.base_ref }}" == "uat" || "${{ github.ref }}" == "refs/heads/uat" ]]; then
+            echo "branch=uat" >> $GITHUB_OUTPUT
+          fi
+          for i in {1..10}; do
+            if [[ "${{ github.base_ref }}" == "f$i" || "${{ github.ref }}" == "refs/heads/f$i" ]]; then
+              echo "branch=feature$i" >> $GITHUB_OUTPUT
+            fi
+          done
+          for i in {1..3}; do
+            if [[ "${{ github.base_ref }}" == "h$i" || "${{ github.ref }}" == "refs/heads/h$i" ]]; then
+              echo "branch=hotfix$i" >> $GITHUB_OUTPUT
+            fi
+          done
+          if [[ "${{ github.base_ref }}" == "demo" || "${{ github.ref }}" == "refs/heads/demo" ]]; then
+            echo "branch=demo" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ github.base_ref }}" == "staging" || "${{ github.ref }}" == "refs/heads/staging" ]]; then
+            echo "branch=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract short branch name
+        id: extract_branch_short
+        shell: bash
+        run: |
+          ref=${GITHUB_REF}
+          branch=${ref#refs/heads/}
+          echo "Branch name: $branch"
+          echo "branch=$branch" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Serverless Dependencies
+        run: npm install -g serverless node-prune modclean --unsafe-perm
+
+      - name: Serverless version
+        run: serverless --version
+
+      - name: modclean
+        run: modclean -n default:safe,default:caution -r --ignore="test"
+
+      - name: echo
+        run: echo "Deploying ${{ steps.extract_branch.outputs.branch }}"
+
+      - name: Remove Secrets YML
+        run: rm -f .secrets.yml
+
+      - name: Copy ENV Secrets
+        if: |
+          steps.extract_branch.outputs.branch == 'develop' ||
+          steps.extract_branch.outputs.branch == 'uat' ||
+          startsWith(steps.extract_branch.outputs.branch, 'feature') ||
+          steps.extract_branch.outputs.branch == 'demo' ||
+          steps.extract_branch.outputs.branch == 'staging' ||
+          startsWith(steps.extract_branch.outputs.branch, 'hotfix') ||
+          steps.extract_branch.outputs.branch == 'temp2'
+        run: cp .secrets.${{ steps.extract_branch.outputs.branch }}.yml .secrets.yml
+
+      - name: Test ENV Copy for CI Pipelines
+        if: startsWith(steps.extract_branch.outputs.branch, 'ci')
+        run: cp .secrets.develop.yml .secrets.yml
+
+      # IBS profile setup
+      - name: AWS ID
+        run: aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }} --profile ibs
+      - name: AWS KEY
+        run: aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }} --profile ibs
+      - name: AWS Region
+        run: aws configure set default.region us-east-1 --profile ibs
+
+      - name: Install jq and yq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          sudo wget https://github.com/mikefarah/yq/releases/download/v4.9.8/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+      - name: Fetch Secrets
+        run: aws secretsmanager get-secret-value --secret-id cf-${{ steps.extract_branch_short.outputs.branch }}-env-secrets --query SecretString --output text > sm-secrets.json
+
+      - name: Convert JSON to YML
+        run: |
+          cat sm-secrets.json | jq '.' | yq e -P - > sm-secrets.yml
+
+      # Serverless Deploy (matrix selects which part to package/deploy)
+      - name: Copy Serverless 1
+        if: matrix.serverless == 'part1'
+        run: cp serverless-part1.yml serverless.yml
+      - name: Copy Serverless 2
+        if: matrix.serverless == 'part2'
+        run: cp serverless-part2.yml serverless.yml
+      - name: Copy Serverless 3
+        if: matrix.serverless == 'part3'
+        run: cp serverless-part3.yml serverless.yml
+
+      - name: Serverless Package
+        if: |
+          steps.extract_branch.outputs.branch == 'develop' ||
+          steps.extract_branch.outputs.branch == 'uat' ||
+          startsWith(steps.extract_branch.outputs.branch, 'feature') ||
+          steps.extract_branch.outputs.branch == 'demo' ||
+          steps.extract_branch.outputs.branch == 'staging' ||
+          startsWith(steps.extract_branch.outputs.branch, 'hotfix') ||
+          steps.extract_branch.outputs.branch == 'temp2'
+        run: serverless package --stage ${{ steps.extract_branch.outputs.branch }}
+
+      - name: Serverless Package CI TEST
+        if: startsWith(steps.extract_branch.outputs.branch, 'ci')
+        run: serverless package --stage develop
+
+      - name: Sleep part2 and 3
+        if: matrix.serverless == 'part2' || matrix.serverless == 'part3'
+        run: sleep 180
+
+      - name: Serverless Deploy
+        if: |
+          steps.extract_branch.outputs.branch == 'develop' ||
+          steps.extract_branch.outputs.branch == 'uat' ||
+          startsWith(steps.extract_branch.outputs.branch, 'feature') ||
+          steps.extract_branch.outputs.branch == 'demo' ||
+          steps.extract_branch.outputs.branch == 'staging' ||
+          startsWith(steps.extract_branch.outputs.branch, 'hotfix') ||
+          steps.extract_branch.outputs.branch == 'temp2'
+        run: serverless deploy --stage ${{ steps.extract_branch.outputs.branch }}
+
+      - name: Serverless prune
+        if: |
+          steps.extract_branch.outputs.branch == 'develop' ||
+          steps.extract_branch.outputs.branch == 'uat' ||
+          startsWith(steps.extract_branch.outputs.branch, 'feature') ||
+          steps.extract_branch.outputs.branch == 'demo' ||
+          steps.extract_branch.outputs.branch == 'staging' ||
+          startsWith(steps.extract_branch.outputs.branch, 'hotfix') ||
+          steps.extract_branch.outputs.branch == 'temp2'
+        run: serverless prune -n 3 --stage ${{ steps.extract_branch.outputs.branch }}
